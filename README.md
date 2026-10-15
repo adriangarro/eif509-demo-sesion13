@@ -1,14 +1,16 @@
-# EIF509 · Demo Sesión 12 — Despliegue de la API en la nube
+# EIF509 · Demo Sesión 13 — Del push al despliegue automático
 
 Repositorio de demostración del curso **EIF509 «Desarrollo de Aplicaciones
 Basadas en Web»** (Universidad Nacional, Costa Rica).
 
 Esta demo continúa el proyecto de la
-[Sesión 11 (JWT y SPA en React)](https://github.com/adriangarro/eif509-demo-sesion11).
-Prepara la API para una **plataforma como servicio** y la publica en internet
-con una base de datos PostgreSQL gestionada, **perfiles de configuración** y
-**secretos** definidos únicamente en la plataforma. Las demos anteriores de
-la serie son:
+[Sesión 12 (despliegue en la nube)](https://github.com/adriangarro/eif509-demo-sesion12).
+Organiza las pruebas del proyecto en una **estrategia**, agrega a la
+construcción con Gradle un **análisis estático** (Checkstyle) y un **umbral
+de cobertura** que la hace fallar, y automatiza el camino completo con un
+**pipeline de GitHub Actions**: cada cambio se verifica y, si está en `main`
+y pasó todas las verificaciones, se despliega solo en la plataforma. Las
+demos anteriores de la serie son:
 [Sesión 3](https://github.com/adriangarro/eif509-demo-sesion3) ·
 [Sesión 4](https://github.com/adriangarro/eif509-demo-sesion4) ·
 [Sesión 5](https://github.com/adriangarro/eif509-demo-sesion5) ·
@@ -17,70 +19,67 @@ la serie son:
 [Sesión 8](https://github.com/adriangarro/eif509-demo-sesion8) ·
 [Sesión 9](https://github.com/adriangarro/eif509-demo-sesion9) ·
 [Sesión 10](https://github.com/adriangarro/eif509-demo-sesion10) ·
-[Sesión 11](https://github.com/adriangarro/eif509-demo-sesion11).
+[Sesión 11](https://github.com/adriangarro/eif509-demo-sesion11) ·
+[Sesión 12](https://github.com/adriangarro/eif509-demo-sesion12).
 
 ## ¿Qué van a construir?
 
-**Parte 1 · El artefacto y la configuración, en su computadora**
+**Parte 1 · Las verificaciones, en su computadora**
 
-1. Un `Dockerfile` en dos etapas: compila con el JDK y ejecuta el JAR con un
-   JRE más liviano.
-2. La configuración separada en perfiles: `application.yml` (común),
-   `application-dev.yml` (Docker Compose) y `application-prod.yml` (la nube).
-   Ningún archivo contiene un valor secreto: solo nombres de variables.
-3. El puerto se lee de la variable `PORT`, como exige la plataforma.
-4. La imagen se construye y se ejecuta **igual que lo hará la plataforma**:
-   perfil `prod`, variables de entorno y un puerto asignado. Flyway aplica las
-   migraciones y la API responde.
-5. Qué pasa cuando falta una variable: el error aparece en los registros de
-   arranque.
+1. Las pruebas del proyecto ordenadas por nivel: unitarias, de la API con
+   MockMvc y de integración con Testcontainers.
+2. Una regla de negocio nueva, el **13 % de IVA**, con una prueba unitaria
+   que la protege (la versión corregida de la prueba 1 de la actividad).
+3. Checkstyle: el análisis estático que detecta errores comunes.
+4. El umbral de JaCoCo: si la capa de negocio baja del 70 % de cobertura, la
+   construcción falla.
+5. `./gradlew check`: pruebas, análisis estático y cobertura en un solo
+   comando, el mismo que ejecuta el pipeline.
 
-**Parte 2 · Despliegue en la plataforma como servicio**
+**Parte 2 · El pipeline completo en GitHub Actions**
 
-1. Crear una base PostgreSQL gestionada y convertir su URL al formato JDBC.
-2. Crear el servicio web conectado al repositorio de GitHub (rama `main`,
-   construcción con el `Dockerfile`).
-3. Configurar las variables de entorno con un secreto JWT nuevo, distinto al
-   de desarrollo.
-4. Seguir los registros de construcción y de arranque.
-5. Abrir la URL pública: Swagger UI, `POST /auth/login` y un `GET` protegido.
-6. Un `push` a `main` genera un despliegue automático.
+1. El workflow `ci-cd.yml` con dos trabajos: `verificar` y `desplegar`.
+2. El deploy hook de la plataforma guardado como secreto del repositorio.
+3. Un cambio visible (rama `cambio-visible`): el pipeline pasa en verde y la
+   aplicación publicada se actualiza sin pasos manuales.
+4. Un cambio que rompe la regla del IVA (rama `cambio-con-error`): la prueba
+   falla, el pipeline se detiene y el despliegue no se ejecuta.
 
-La plataforma de referencia es [Render](https://render.com) (los pasos son
-equivalentes en Railway u otra plataforma que construya a partir de un
-`Dockerfile`). El código de la API no cambia respecto a la Sesión 11: todo
-lo que se agrega es configuración.
-
-### Cómo queda el sistema desplegado
+### El pipeline
 
 ```text
-          push a main                     construye el Dockerfile
- GitHub  ───────────────►  Plataforma  ──────────────────────────►  Servicio web (la API)
- (código, sin secretos)    (integración continua: pruebas)          https://<nombre>.onrender.com
-                                                                     SPRING_PROFILES_ACTIVE=prod
-                                                                     JWT_SECRETO, CORS_ORIGEN, PORT
-                                                                        │ DATABASE_URL / USER / PASSWORD
-                                                                        ▼
- Navegador ──► Sitio estático (la SPA) ──── CORS ────► API        PostgreSQL gestionado
-               VITE_API_URL=https://<api>                         (Flyway aplica V1..V7 al arrancar)
+                    ┌──────────────────────────────────────────┐
+ push a main   ───► │ verificar  (en cada push y pull request) │
+ pull request  ───► │   ./gradlew check                        │
+                    │     compilación · pruebas (76)           │
+                    │     Checkstyle · umbral de cobertura     │
+                    └──────────────────┬───────────────────────┘
+                                       │ needs: verificar   (solo si terminó en verde)
+                                       │ if: refs/heads/main (solo en main)
+                                       ▼
+                    ┌──────────────────────────────────────────┐
+                    │ desplegar                                │
+                    │   curl -X POST $DEPLOY_HOOK  ───────────►│──► Render construye la imagen
+                    └──────────────────────────────────────────┘    y publica la versión nueva
 ```
 
-Cada variable se configura en **un solo lugar**: la sección de variables de
-entorno del servicio en la plataforma. El repositorio y su historial no
-contienen ningún valor.
+En la plataforma, el despliegue automático por push está **desactivado**:
+solo se despliega lo que pasó por el pipeline.
 
-### Variables de entorno (lámina 14)
+### La estrategia de pruebas del proyecto
 
-| Variable | Ejemplo | Para qué se usa |
-|---|---|---|
-| `SPRING_PROFILES_ACTIVE` | `prod` | Activa `application-prod.yml` |
-| `DATABASE_URL` | `jdbc:postgresql://host:5432/eif509` | Conexión a PostgreSQL (formato JDBC) |
-| `DATABASE_USER` / `DATABASE_PASSWORD` | Los entrega la plataforma | Credenciales de PostgreSQL |
-| `JWT_SECRETO` | 32 o más caracteres aleatorios | Firma y verificación de los tokens |
-| `CORS_ORIGEN` | `https://eif509-spa.onrender.com` | Origen autorizado para la SPA |
-| `PORT` | Lo asigna la plataforma (en Render, `10000`) | Puerto en el que escucha la API |
-| `MONGODB_URI` | `mongodb+srv://usuario:clave@cluster/...` | Solo si el proyecto usa MongoDB (este repositorio no) |
-| `VITE_API_URL` (en la SPA) | `https://eif509-demo-sesion12.onrender.com` | URL de la API al construir la SPA |
+Cada comportamiento se prueba en el nivel más económico que permita
+verificarlo:
+
+| Nivel | Qué verifica | Clases | Pruebas | Tiempo típico |
+|---|---|---|---|---|
+| Unitarias (JUnit y Mockito, sin Spring) | Reglas de negocio | `CalculadoraIvaTest`, `PedidoServiceTest`, `ProductoServiceTest`, `FacturaServiceTest`, `PedidoMapperTest` | 22 | Milisegundos |
+| API y vistas (MockMvc, sin base de datos) | Contrato HTTP, validación y seguridad | `PedidoControllerTest`, `ProductoApiTest`, `SeguridadApiTest`, `ProductoWebTest` | 30 | Decenas de milisegundos |
+| Integración (Testcontainers con PostgreSQL) | Mapeo JPA, restricciones, transacciones y el recorrido completo | `PedidoRepositoryIT`, `PedidoServiceIT`, `PedidoApiIT`, `AutenticacionIT`, `AdminProductosIT` | 24 | Segundos |
+| **Total** | | | **76** | |
+
+El Laboratorio 7 pedirá al menos 40 pruebas en verde en la integración
+continua.
 
 ## Requisitos previos
 
@@ -89,52 +88,49 @@ contienen ningún valor.
 | Docker Desktop | 4.x | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) | `docker --version` |
 | JDK (Java) | 21 | [adoptium.net](https://adoptium.net/) | `java -version` |
 | Git | 2.30 | [git-scm.com/downloads](https://git-scm.com/downloads) | `git --version` |
-| Un cliente HTTP | — | `curl` viene con macOS, Linux y Windows 10+ | `curl --version` |
-| Cuenta en GitHub | — | [github.com](https://github.com) | Con el repositorio de su proyecto |
+| GitHub CLI (opcional) | 2.x | [cli.github.com](https://cli.github.com/) | `gh --version` |
+| Cuenta en GitHub | — | [github.com](https://github.com) | Con permiso de escritura en el repositorio |
 | Cuenta en la plataforma | — | [render.com](https://render.com) (iniciar sesión con GitHub) | Para la Parte 2 |
 
-Node.js solo hace falta para ejecutar la SPA en local (Sesión 11). Las
-peticiones contra la URL pública también están en
-[`peticiones/nube.http`](peticiones/nube.http), para el cliente HTTP de
-IntelliJ IDEA o la extensión *REST Client* de VS Code. En macOS con
-Homebrew, en cada terminal que usen:
+Con la GitHub CLI, los pasos de la Parte 2 se hacen desde la terminal; sin
+ella, cada paso indica también dónde hacerlo en la página de GitHub. En
+macOS con Homebrew, en cada terminal que usen:
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 ```
 
-Este repositorio tiene una sola rama, `main`: la versión lista para
-desplegar.
+## Las tres ramas
+
+| Rama | Contenido | Uso |
+|---|---|---|
+| `main` | El proyecto con el pipeline, la regla del IVA, Checkstyle y el umbral de cobertura | Lo que está desplegado |
+| `cambio-visible` | `main` más un texto nuevo en la descripción de la API (Swagger UI) | Paso 13: se integra a `main` y se despliega solo |
+| `cambio-con-error` | `main` con el IVA cambiado de 13 % a 12 % | Paso 14: el pipeline lo detiene |
 
 ## Usuarios de demostración
 
-La migración `V7__usuarios.sql` crea dos usuarios, con la clave guardada
-con BCrypt. Son los mismos en local y en la nube, porque Flyway aplica las
-mismas migraciones sobre la base gestionada:
-
-| Correo | Clave | Rol | Puede |
-|---|---|---|---|
-| `admin@demo.cr` | `admin123` | `ADMIN` | Todo: crear productos y ver cualquier pedido |
-| `cliente@demo.cr` | `cliente123` | `CLIENTE` | Leer el catálogo y ver solo sus propios pedidos |
+| Correo | Clave | Rol |
+|---|---|---|
+| `admin@demo.cr` | `admin123` | `ADMIN` |
+| `cliente@demo.cr` | `cliente123` | `CLIENTE` |
 
 ## Estructura del proyecto
 
-Lo nuevo respecto a la Sesión 11 está marcado con `←`:
+Lo nuevo respecto a la Sesión 12 está marcado con `←`:
 
 ```text
-├── Dockerfile                                     ← la imagen en dos etapas (lámina 8)
-├── .dockerignore                                  ← lo que no entra en la imagen
-├── .github/workflows/ci.yml                       ← nuevo trabajo: construir la imagen
-├── docker-compose.yml                                PostgreSQL para el perfil dev
-├── peticiones/nube.http                           ← peticiones contra la URL pública
-├── spa/                                              la SPA en React (Sesión 11)
-└── src/main/resources/
-    ├── application.yml                            ← común: server.port=${PORT:8080}, ${JWT_SECRETO}, ${CORS_ORIGEN}
-    ├── application-dev.yml                        ← la base del docker-compose.yml
-    ├── application-prod.yml                       ← ${DATABASE_URL}, ${DATABASE_USER}, ${DATABASE_PASSWORD}
-    ├── application-sin-cors.yml                      perfil de la demostración de CORS (Sesión 11)
-    ├── application-sin-manejador.yml                 perfil de la demostración de errores (Sesión 9)
-    └── db/migration/V1..V7                           las migraciones que Flyway aplica en la nube
+├── .github/workflows/ci-cd.yml                    ← el pipeline: verificar y desplegar (lámina 17)
+├── build.gradle                                   ← Checkstyle y el umbral de cobertura en check (lámina 16)
+├── config/checkstyle/checkstyle.xml               ← las reglas del análisis estático
+├── Dockerfile                                        la imagen que construye la plataforma (Sesión 12)
+└── src/
+    ├── main/java/cr/una/eif509/demo/
+    │   ├── service/CalculadoraIva.java            ← la regla del 13 % de IVA
+    │   └── dto/PedidoResumen.java                 ← el pedido ahora incluye iva y totalConIva
+    └── test/java/cr/una/eif509/demo/
+        ├── service/CalculadoraIvaTest.java        ← una buena prueba: AAA, nombre de la regla, aserción
+        └── service/FacturaServiceTest.java        ← una prueba revisada con los criterios de la actividad
 ```
 
 ## Las demostraciones paso a paso
@@ -145,16 +141,18 @@ secciones detalladas más abajo: el número entre paréntesis indica dónde.
 
 ### Antes de empezar
 
-Abran Docker Desktop y esperen a que termine de iniciar. Inicien sesión en
-[dashboard.render.com](https://dashboard.render.com) con su cuenta de
-GitHub. Abran dos terminales en la carpeta del repositorio clonado:
+Abran Docker Desktop y esperen a que termine de iniciar. Abran en el
+navegador la pestaña **Actions** del repositorio
+(`https://github.com/adriangarro/eif509-demo-sesion13/actions`) y la URL
+pública de la API. Abran dos terminales en la carpeta del repositorio
+clonado:
 
 ```bash
-git clone https://github.com/adriangarro/eif509-demo-sesion12.git
+git clone https://github.com/adriangarro/eif509-demo-sesion13.git
 ```
 
 ```bash
-cd eif509-demo-sesion12
+cd eif509-demo-sesion13
 ```
 
 En macOS con Homebrew, ejecuten en ambas terminales:
@@ -163,218 +161,140 @@ En macOS con Homebrew, ejecuten en ambas terminales:
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 ```
 
-**Despertar el servicio en la nube.** Si ya tienen un servicio desplegado
-(el de respaldo), el plan gratuito lo suspende tras 15 minutos sin tráfico
-y tarda unos dos minutos en volver a arrancar. Para que responda al
-instante durante la Parte 2, abran una **tercera terminal** y dejen este
-bucle en ejecución durante toda la clase (una petición cada 5 minutos):
+**Despertar el servicio en la nube.** El plan gratuito suspende el servicio
+tras 15 minutos sin tráfico y tarda unos dos minutos en volver a arrancar.
+Para que responda al instante durante la demostración, abran una **tercera
+terminal** y dejen este bucle en ejecución durante toda la clase (una
+petición cada 5 minutos):
 
 ```bash
-while true; do curl -s -o /dev/null -w "$(date +%H:%M:%S) -> %{http_code}\n" https://eif509-demo-sesion12.onrender.com/api/v1/productos; sleep 300; done
+while true; do curl -s -o /dev/null -w "$(date +%H:%M:%S) -> %{http_code}\n" https://eif509-demo-sesion13.onrender.com/api/v1/productos; sleep 300; done
 ```
 
 La primera línea puede tardar hasta dos minutos (el servicio está
-despertando); a partir de ahí cada línea muestra `401` de inmediato, que
-es la respuesta correcta sin token. Al terminar la clase, deténganlo con
-`Ctrl+C`. Si prefieren no dejar nada en ejecución, ejecuten una sola
-petición al menos dos minutos antes de llegar al paso 12 y repítanla si
-pasan más de 15 minutos sin usar la URL:
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://eif509-demo-sesion12.onrender.com/api/v1/productos
-```
+despertando); a partir de ahí cada línea muestra `401` de inmediato, que es
+la respuesta correcta sin token. Al terminar la clase, deténganlo con
+`Ctrl+C`.
 
 ### Ejemplo: comandos en la computadora del profesor (macOS)
 
-Con el repositorio en `~/Documents/Claude/eif509-demo-sesion12`, los
+Con el repositorio en `~/Documents/Claude/eif509-demo-sesion13`, los
 comandos que cambian respecto a esta sección quedan así, listos para copiar.
 Los demás pasos son idénticos.
+
+Antes de empezar, en la terminal 3:
+
+```bash
+while true; do curl -s -o /dev/null -w "$(date +%H:%M:%S) -> %{http_code}\n" https://eif509-demo-sesion13.onrender.com/api/v1/productos; sleep 300; done
+```
 
 Paso 2, en la terminal 1:
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home && cd ~/Documents/Claude/eif509-demo-sesion12 && docker compose down -v && docker compose up -d && docker build -t eif509-demo-sesion12 .
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home && cd ~/Documents/Claude/eif509-demo-sesion13 && git switch main && git pull && ./gradlew clean check
 ```
 
-Paso 3, en la terminal 1:
+Paso 4, en la terminal 1:
 
 ```bash
-docker run --rm --name api-prod -p 10000:10000 -e PORT=10000 -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev -e JWT_SECRETO=$(openssl rand -base64 48) -e CORS_ORIGEN=https://eif509-spa.onrender.com eif509-demo-sesion12
+cd ~/Documents/Claude/eif509-demo-sesion13 && git switch main && git pull && git merge --no-edit origin/cambio-visible && git push
 ```
 
-Paso 4, en la terminal 2:
+Paso 6, en la terminal 1:
 
 ```bash
-cd ~/Documents/Claude/eif509-demo-sesion12 && curl -i http://localhost:10000/api/v1/productos
+cd ~/Documents/Claude/eif509-demo-sesion13 && gh pr create --base main --head cambio-con-error --title "IVA al 12 %" --body "Cambio que rompe la regla del IVA (demostración de la Sesión 13)."
 ```
 
-Paso 8, en la terminal 2 (el secreto nuevo para la plataforma):
+### Parte 1 · Las verificaciones en su computadora
+
+**1. Recorrer el workflow (paso 10).** Abran
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). Qué observar:
+los dos trabajos, `needs: verificar` y la condición
+`if: github.ref == 'refs/heads/main'`.
+
+**2. El umbral de cobertura y `./gradlew check` (pasos 7 y 8).** Muestren el
+bloque `jacocoTestCoverageVerification` en
+[`build.gradle`](build.gradle) y ejecuten en la terminal 1:
 
 ```bash
-openssl rand -base64 48
+./gradlew clean check
 ```
 
-Antes de empezar, en una terminal 3 (mantiene despierto el servicio de
-respaldo durante la clase; se detiene con `Ctrl+C` al final):
+Termina con `BUILD SUCCESSFUL`. Los reportes quedan en
+`build/reports/jacoco/test/html/index.html` y
+`build/reports/checkstyle/main.html`:
 
 ```bash
-while true; do curl -s -o /dev/null -w "$(date +%H:%M:%S) -> %{http_code}\n" https://eif509-demo-sesion12.onrender.com/api/v1/productos; sleep 300; done
+open build/reports/jacoco/test/html/index.html
 ```
 
-Al terminar:
+(En Linux, `xdg-open`; en Windows, `start`.)
+
+### Parte 2 · El pipeline en GitHub Actions
+
+**3. El secreto DEPLOY_HOOK (paso 12).** En GitHub: **Settings → Secrets and
+variables → Actions**. Se ve el nombre `DEPLOY_HOOK`, nunca su valor. Desde
+la terminal:
 
 ```bash
-cd ~/Documents/Claude/eif509-demo-sesion12 && docker compose down -v
+gh secret list
 ```
 
-### Parte 1 · El artefacto en su computadora
-
-**1. Revisar los archivos (paso 5).** Abran `Dockerfile`,
-`src/main/resources/application.yml` y `application-prod.yml`. Qué
-observar: dos etapas en la imagen, `server.port: ${PORT:8080}` y ningún
-valor secreto, solo `${NOMBRE}`.
-
-**2. Construir la imagen (paso 6).** En la terminal 1:
+**4. Integrar el cambio visible a main (paso 13).** En la terminal 1:
 
 ```bash
-docker compose down -v && docker compose up -d && docker build -t eif509-demo-sesion12 .
+git switch main && git pull && git merge --no-edit origin/cambio-visible && git push
 ```
 
-Tarda unos minutos la primera vez (descarga Gradle y las dependencias).
-
-**3. Ejecutar la imagen como lo hará la plataforma (paso 7).** En la
-terminal 1:
+Sigan la ejecución en la pestaña **Actions**: primero `verificar` (unos dos
+minutos) y, cuando termina en verde, `desplegar`. Desde la terminal:
 
 ```bash
-docker run --rm --name api-prod -p 10000:10000 -e PORT=10000 -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev -e JWT_SECRETO=$(openssl rand -base64 48) -e CORS_ORIGEN=https://eif509-spa.onrender.com eif509-demo-sesion12
+gh run watch
 ```
 
-Qué observar en los registros: `profile is active: "prod"`,
-`Successfully applied 7 migrations` y `Tomcat started on port 10000`.
-
-**4. Probar la API (paso 8).** En la terminal 2:
+**5. Ver el cambio en producción (paso 13).** El trabajo `desplegar` solo
+inicia el despliegue; la plataforma tarda unos cinco minutos en construir y
+arrancar la versión nueva (pestaña **Events** de Render). Mientras tanto, la
+versión anterior sigue atendiendo. Comprueben desde la terminal 2:
 
 ```bash
-curl -i http://localhost:10000/api/v1/productos
+curl -s https://eif509-demo-sesion13.onrender.com/v3/api-docs | grep -c "pipeline CI/CD"
 ```
 
-Responde 401. Inicien sesión y repitan con el token:
+Responde `0` mientras la versión anterior sigue publicada y `1` cuando la
+nueva está en línea. Entonces recarguen Swagger UI
+(`https://eif509-demo-sesion13.onrender.com/swagger-ui.html`): la
+descripción de la API tiene un párrafo nuevo.
+
+**6. Un pull request que rompe una prueba (paso 14).** En la terminal 1:
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:10000/auth/login -H 'Content-Type: application/json' -d '{"correo": "admin@demo.cr", "clave": "admin123"}' | sed 's/.*"token":"\([^"]*\)".*/\1/')
+gh pr create --base main --head cambio-con-error --title "IVA al 12 %" --body "Cambio que rompe la regla del IVA (demostración de la Sesión 13)."
 ```
 
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:10000/api/v1/productos
-```
-
-Responde 200. Swagger UI está en `http://localhost:10000/swagger-ui.html`.
-
-**5. Qué pasa si falta una variable (paso 9).** En la terminal 1,
-presionen `Ctrl+C` y ejecuten:
-
-```bash
-docker run --rm -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev eif509-demo-sesion12
-```
-
-La aplicación no arranca: `Could not resolve placeholder 'JWT_SECRETO'`.
-Es el mismo mensaje que verán en los registros de la plataforma.
-
-### Parte 2 · Despliegue en la plataforma
-
-**6. Crear la base de datos (paso 10).** En el panel de Render:
-**New → Postgres**. Nombre `eif509-db`, base `eif509`, usuario `eif509`,
-versión **16**, plan **Free**. Al crearse, en la pestaña **Info** copien
-**Hostname**, **Port**, **Database**, **Username** y **Password**.
-
-**7. Convertir la URL al formato JDBC (paso 11).** Si copiaron la
-**Internal Database URL** (`postgresql://usuario:clave@host/base`), en la
-terminal 2:
-
-```bash
-python3 -c "import sys, urllib.parse as u; p = u.urlparse(sys.argv[1]); print(f'DATABASE_URL=jdbc:postgresql://{p.hostname}:{p.port or 5432}{p.path}'); print(f'DATABASE_USER={p.username}'); print(f'DATABASE_PASSWORD={p.password}')" 'postgresql://usuario:clave@host/base'
-```
-
-Reemplacen el último argumento por la URL copiada (entre comillas simples).
-
-**8. Generar el secreto JWT de producción (paso 13).** En la terminal 2:
-
-```bash
-openssl rand -base64 48
-```
-
-Es un secreto nuevo: no es el de desarrollo ni está en ningún repositorio.
-
-**9. Crear el servicio web (paso 12).** **New → Web Service → Git
-Provider**, elijan el repositorio. Nombre `eif509-demo-sesion12`, rama
-`main`, lenguaje **Docker**, misma región que la base, plan **Free**.
-
-**10. Configurar las variables (paso 13).** En **Environment Variables**
-del mismo formulario, agreguen `SPRING_PROFILES_ACTIVE=prod`,
-`DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD` (paso 7),
-`JWT_SECRETO` (paso 8) y `CORS_ORIGEN=https://eif509-spa.onrender.com`.
-Pulsen **Deploy Web Service** (o **Create Web Service**, según la versión
-del panel).
-
-**11. Leer los registros (paso 14).** En la pestaña **Logs** del
-servicio: Gradle compila, se construye la imagen, arranca Spring con el
-perfil `prod`, Flyway aplica las 7 migraciones sobre la base vacía y
-Tomcat escucha en el puerto 10000.
-
-**12. Probar la URL pública (paso 15).** Si el servicio lleva más de 15
-minutos sin tráfico, está suspendido: la primera petición tarda unos dos
-minutos (ver «Despertar el servicio en la nube» en «Antes de empezar»).
-Abran `https://eif509-demo-sesion12.onrender.com/swagger-ui.html` (también
-desde el teléfono). En la terminal 2, con su URL:
-
-```bash
-API=https://eif509-demo-sesion12.onrender.com
-```
-
-```bash
-curl -i $API/api/v1/productos
-```
-
-```bash
-TOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"correo": "admin@demo.cr", "clave": "admin123"}' | sed 's/.*"token":"\([^"]*\)".*/\1/')
-```
-
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" "$API/api/v1/productos?page=0&size=3"
-```
-
-**13. Un cambio y despliegue automático (paso 16).** Editen la
-descripción en `src/main/java/cr/una/eif509/demo/DemoApplication.java`
-(por ejemplo, agreguen «Desplegada en la nube en la Sesión 12.») y
-publiquen:
-
-```bash
-git commit -am "Descripción de la API: desplegada en la nube" && git push
-```
-
-En la pestaña **Events** aparece el despliegue nuevo; al terminar,
-recarguen Swagger UI.
+(Sin la GitHub CLI: en la página del repositorio, **Pull requests → New pull
+request**, base `main`, compare `cambio-con-error`.) En la pestaña
+**Actions**, `verificar` termina en rojo con tres pruebas fallidas y
+`desplegar` ni siquiera aparece. Producción sigue igual.
 
 ### Al terminar
 
-En la terminal 1, `Ctrl+C` si la imagen sigue en ejecución, y apaguen la
-base local:
+Detengan con `Ctrl+C` el bucle de la terminal 3. Cierren el pull request sin
+integrarlo (**Close pull request** en GitHub, o desde la terminal):
 
 ```bash
-docker compose down -v
+gh pr close cambio-con-error
 ```
-
-Detengan con `Ctrl+C` el bucle de la terminal 3. El servicio en la nube
-queda en ejecución; en el plan gratuito se suspende tras 15 minutos sin
-tráfico y despierta con la siguiente petición (tarda uno o dos minutos).
 
 ## Instalación y configuración
 
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/adriangarro/eif509-demo-sesion12.git
-cd eif509-demo-sesion12
+git clone https://github.com/adriangarro/eif509-demo-sesion13.git
+cd eif509-demo-sesion13
 ```
 
 ### 2. Verificar que Docker Desktop está en ejecución
@@ -383,526 +303,461 @@ cd eif509-demo-sesion12
 docker info
 ```
 
-Si ven `Cannot connect to the Docker daemon`, abran Docker Desktop y
-esperen a que termine de iniciar.
+Las pruebas de integración levantan PostgreSQL con Testcontainers: sin
+Docker, `./gradlew check` falla. Si ven `Cannot connect to the Docker
+daemon`, abran Docker Desktop y esperen a que termine de iniciar.
 
-### 3. Levantar PostgreSQL
+### 3. Verificar Java
+
+```bash
+java -version
+```
+
+Debe reportar 21 o superior.
+
+### 4. (Opcional) Ejecutar la API en local
+
+No hace falta para esta demostración, pero funciona igual que en la Sesión
+12:
 
 ```bash
 docker compose up -d
-docker ps
-```
-
-Deben ver `eif509-demo-sesion12-db-1` en estado `Up`. Si aparece
-`port is already allocated`, otra base del curso ocupa el puerto 5432:
-deténganla desde su carpeta (por ejemplo,
-`cd ../eif509-demo-sesion11 && docker compose stop`) y reintenten.
-
-### 4. Verificar que todo sigue funcionando en desarrollo
-
-```bash
 export JWT_SECRETO=$(openssl rand -base64 48)
 ./gradlew bootRun
 ```
 
-Sin `SPRING_PROFILES_ACTIVE`, se usa el perfil `dev`
-(`spring.profiles.default: dev` en `application.yml`): la base del Docker
-Compose y el puerto 8080. Salida esperada:
+`GET /api/v1/pedidos/1` ahora incluye `iva` y `totalConIva`.
+
+## Parte 1 · Las verificaciones, en su computadora
+
+### 5. La regla del IVA y una buena prueba
+
+[`CalculadoraIva`](src/main/java/cr/una/eif509/demo/service/CalculadoraIva.java)
+calcula el 13 % de IVA, redondeado a dos decimales:
+
+```java
+public static final BigDecimal TARIFA = new BigDecimal("0.13");
+
+public static BigDecimal iva(BigDecimal subtotal) {
+    return subtotal.multiply(TARIFA).setScale(2, RoundingMode.HALF_UP);
+}
+
+public static BigDecimal totalConIva(BigDecimal subtotal) {
+    return subtotal.add(iva(subtotal)).setScale(2, RoundingMode.HALF_UP);
+}
+```
+
+[`CalculadoraIvaTest`](src/test/java/cr/una/eif509/demo/service/CalculadoraIvaTest.java)
+la protege con la versión corregida de la prueba 1 de la actividad:
+
+```java
+@Test
+void totalConIva_sumaElTrecePorCientoAlSubtotal() {
+    // Arrange: dos unidades de 1000 colones
+    var subtotal = new BigDecimal("2000.00");
+
+    // Act
+    var total = CalculadoraIva.totalConIva(subtotal);
+
+    // Assert
+    assertThat(total).isEqualByComparingTo("2260.00");
+}
+```
+
+**Qué observar**: la estructura AAA (preparar, ejecutar una sola acción,
+verificar), un nombre que describe la regla y una aserción sobre el
+resultado. Es una regla pura, sin dependencias, así que se prueba en el
+nivel más económico: la prueba tarda menos de un milisegundo.
+
+La API expone el resultado en cada pedido (`PedidoResumen`): `total` es el
+subtotal (precio × cantidad), y `iva` y `totalConIva` los calcula
+`CalculadoraIva`.
+
+### 6. Una prueba del proyecto revisada con los criterios de la actividad
+
+En
+[`FacturaServiceTest`](src/test/java/cr/una/eif509/demo/service/FacturaServiceTest.java),
+la prueba del camino feliz solo verificaba que se llamara al repositorio:
+
+```java
+service.crear(pedidoPor("15000.00"));
+
+verify(facturas).saveAndFlush(any(Factura.class));   // antes: la implementación
+```
+
+Ahora verifica el resultado, el monto de la factura:
+
+```java
+var factura = service.crear(pedidoPor("15000.00"));
+
+assertThat(factura.getMonto()).isEqualByComparingTo("15000.00");   // ahora: el comportamiento
+```
+
+**Qué observar**: la versión anterior pasaba aunque la factura se creara con
+un monto incorrecto. Es el defecto de la prueba 4 de la actividad: verificar
+llamadas internas en lugar del resultado.
+
+### 7. El análisis estático con Checkstyle
+
+[`build.gradle`](build.gradle) aplica el plugin `checkstyle` con las reglas de
+[`config/checkstyle/checkstyle.xml`](config/checkstyle/checkstyle.xml):
+importaciones sin usar o con comodín, bloques `catch` vacíos, comparaciones
+de cadenas con `==`, `equals` sin `hashCode`, `if` sin llaves, entre otras.
+
+```groovy
+checkstyle {
+    toolVersion = '10.18.1'
+    maxWarnings = 0
+}
+```
+
+Para ver que funciona, agreguen una importación sin usar a cualquier clase
+(por ejemplo, `import java.util.List;` en `CalculadoraIva.java`) y ejecuten:
+
+```bash
+./gradlew checkstyleMain
+```
 
 ```text
-cr.una.eif509.demo.DemoApplication       : No active profile set, falling back to 1 default profile: "dev"
-o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+> Task :checkstyleMain FAILED
+[ant:checkstyle] [ERROR] .../service/CalculadoraIva.java:5:8: Importación no usada - java.util.List. [UnusedImports]
 ```
 
-Detengan la aplicación con `Ctrl+C`. Los perfiles de las demostraciones
-anteriores se combinan con `dev`:
-`./gradlew bootRun --args='--spring.profiles.active=dev,sin-cors'`.
+Quiten la línea antes de continuar.
 
-## Parte 1 · El artefacto y la configuración, en su computadora
+### 8. El umbral de cobertura y `./gradlew check`
 
-### 5. Revisar el Dockerfile y los perfiles
+El umbral de la lámina 16 está en [`build.gradle`](build.gradle):
 
-[`Dockerfile`](Dockerfile) es el de la lámina 8:
+```groovy
+jacocoTestCoverageVerification {
+    dependsOn test
+    violationRules {
+        rule {
+            element = 'PACKAGE'
+            includes = ['cr.una.eif509.demo.service']
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.70
+            }
+        }
+    }
+}
 
-```dockerfile
-# Etapa 1: compilar
-FROM eclipse-temurin:21-jdk AS build
-WORKDIR /app
-COPY . .
-RUN ./gradlew bootJar --no-daemon -x test
-
-# Etapa 2: ejecutar
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY --from=build /app/build/libs/*.jar app.jar
-EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+check.dependsOn jacocoTestCoverageVerification
 ```
 
-**Qué observar**: la primera etapa compila con el JDK; la segunda copia
-solo el JAR a una imagen con el JRE, más pequeña y sin el código fuente ni
-Gradle. Las pruebas se omiten (`-x test`) porque ya se ejecutaron en la
-integración continua: lo que llega a `main` ya pasó las pruebas.
-[`.dockerignore`](.dockerignore) deja fuera `build/`, `.git/` y la SPA.
+**Qué observar**: si la capa de negocio (el paquete `service`) baja del 70 %
+de líneas cubiertas, la tarea falla, y con ella `check` y el pipeline. La
+regla de la rúbrica queda verificada de forma automática.
 
-[`application.yml`](src/main/resources/application.yml) tiene lo común a
-todos los ambientes:
+```bash
+./gradlew clean check
+```
+
+Salida esperada (resumida):
+
+```text
+> Task :checkstyleMain
+> Task :checkstyleTest
+> Task :test
+  CalculadoraIvaTest           totalConIva_sumaElTrecePorCientoAlSubtotal()  SUCCESS      0 ms
+  ...
+> Task :jacocoTestCoverageVerification
+> Task :jacocoTestReport
+BUILD SUCCESSFUL
+```
+
+Un solo comando ejecuta la compilación, las 76 pruebas (unitarias, de la API
+y de integración), Checkstyle y el umbral de cobertura. Es exactamente lo que
+ejecuta el trabajo `verificar` del pipeline: lo que pasa en su computadora
+pasa en la integración continua.
+
+### 9. Lo que detecta la regla del IVA: prueba de mutación manual
+
+Cambien a propósito el 13 % por 12 % y ejecuten las pruebas unitarias (es lo
+que contiene la rama `cambio-con-error`):
+
+```bash
+git switch cambio-con-error && ./gradlew unitTest
+```
+
+```text
+  PedidoMapperTest             copiaSoloLoQueLaVistaNecesita()               FAILURE
+  CalculadoraIvaTest           iva_seRedondeaADosDecimales()                 FAILURE
+  CalculadoraIvaTest           totalConIva_sumaElTrecePorCientoAlSubtotal()  FAILURE
+52 tests completed, 3 failed
+BUILD FAILED
+```
+
+Vuelvan a `main`:
+
+```bash
+git switch main
+```
+
+**Qué observar**: si al introducir un error a propósito ninguna prueba
+fallara, esa regla no estaría protegida, aunque la cobertura fuera alta.
+
+## Parte 2 · El pipeline en GitHub Actions
+
+### 10. El workflow
+
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) es el de la
+lámina 17:
 
 ```yaml
-server:
-  port: ${PORT:8080}
-jwt:
-  secreto: ${JWT_SECRETO}
-cors:
-  origenes: ${CORS_ORIGEN:http://localhost:5173}
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - run: ./gradlew check
+
+  desplegar:
+    needs: verificar
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK }}"
 ```
 
-[`application-prod.yml`](src/main/resources/application-prod.yml), solo las
-diferencias:
+**Qué observar**:
 
-```yaml
-spring:
-  datasource:
-    url: ${DATABASE_URL}
-    username: ${DATABASE_USER}
-    password: ${DATABASE_PASSWORD}
-  jpa:
-    show-sql: false
-logging:
-  level:
-    root: INFO
-```
+- `verificar` se ejecuta en cada push a `main` y en cada pull request.
+  `ubuntu-latest` trae Docker, por eso las pruebas con Testcontainers
+  funcionan sin configuración adicional.
+- `desplegar` tiene dos condiciones: `needs: verificar` (solo si el primero
+  terminó en verde) e `if: github.ref == 'refs/heads/main'` (en un pull
+  request, `github.ref` es `refs/pull/N/merge`, así que no se despliega).
+- `curl -fsS` hace que el paso falle si la plataforma rechaza la petición, en
+  lugar de terminar en verde sin haber desplegado.
 
-**Qué observar**: ningún valor secreto aparece en estos archivos, solo los
-nombres de las variables. La plataforma asigna el puerto en `PORT`; si la
-aplicación escuchara en un puerto fijo, la plataforma no podría dirigirle
-el tráfico y respondería 502. Los registros van a la salida estándar y la
-plataforma los recolecta: no se escriben archivos en el contenedor, que se
-pierden al reiniciarlo. [`application-dev.yml`](src/main/resources/application-dev.yml)
-apunta a la base del Docker Compose con las credenciales `dev`/`dev`, que
-no existen en ningún otro lugar.
+### 11. Preparar la plataforma
 
-### 6. Construir la imagen
+Los pasos son los de la Sesión 12 (servicio web con lenguaje **Docker**,
+plan **Free** y las mismas variables de entorno), con dos diferencias:
+
+1. **Desactivar el despliegue automático.** Al crear el servicio, en
+   **Advanced → Auto-Deploy**, elijan **Off** (en un servicio que ya existe:
+   **Settings → Deploy → Auto-Deploy → Edit → Off**). Así, un push a
+   `main` ya no despliega por sí solo: solo despliega el pipeline, después de
+   las verificaciones.
+2. **Copiar el deploy hook.** En **Settings → Deploy → Deploy Hook**,
+   pulsen el botón de copiar. Es una URL de la forma
+   `https://api.render.com/deploy/srv-...?key=...`: cualquiera que la conozca
+   puede iniciar un despliegue, por eso es un secreto.
+
+El servicio de esta demostración es `eif509-demo-sesion13`, en
+`https://eif509-demo-sesion13.onrender.com`, y usa la misma base PostgreSQL
+gestionada de la Sesión 12.
+
+### 12. Guardar el deploy hook como secreto del repositorio
+
+En GitHub: **Settings → Secrets and variables → Actions → New repository
+secret**, nombre `DEPLOY_HOOK` y, como valor, la URL copiada. Con la GitHub
+CLI, desde la carpeta del repositorio:
 
 ```bash
-docker build -t eif509-demo-sesion12 .
+gh secret set DEPLOY_HOOK
 ```
 
-Salida esperada al final (la primera vez tarda unos minutos):
-
-```text
- => [build 4/4] RUN ./gradlew bootJar --no-daemon -x test
- => [stage-1 3/3] COPY --from=build /app/build/libs/*.jar app.jar
- => => naming to docker.io/library/eif509-demo-sesion12:latest
-```
-
-Es exactamente lo que hará la plataforma en cada `push`. Si la
-construcción falla aquí, fallará también allá: por eso el CI de este
-repositorio también construye la imagen
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml), trabajo `imagen`).
-
-### 7. Ejecutar la imagen como lo hará la plataforma
-
-La base del Docker Compose debe estar en ejecución (paso 3). Arranquen el
-contenedor con el perfil `prod`, las variables de la tabla y un puerto
-distinto al 8080, como haría la plataforma:
+El comando pide el valor sin mostrarlo en pantalla. Para comprobarlo:
 
 ```bash
-docker run --rm --name api-prod -p 10000:10000 -e PORT=10000 -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev -e JWT_SECRETO=$(openssl rand -base64 48) -e CORS_ORIGEN=https://eif509-spa.onrender.com eif509-demo-sesion12
-```
-
-Salida esperada:
-
-```text
-cr.una.eif509.demo.DemoApplication       : The following 1 profile is active: "prod"
-org.flywaydb.core.FlywayExecutor         : Database: jdbc:postgresql://host.docker.internal:5432/eif509 (PostgreSQL 16.15)
-o.f.core.internal.command.DbMigrate      : Successfully applied 7 migrations to schema "public", now at version v7
-o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 10000 (http) with context path '/'
-cr.una.eif509.demo.DemoApplication       : Started DemoApplication in 1.991 seconds
-```
-
-**Qué observar**: el mismo artefacto que corre en desarrollo corre aquí con
-otra configuración, recibida completa desde el entorno (factor
-«configuración» de los doce factores). `host.docker.internal` es la
-dirección con la que un contenedor llega a la computadora anfitriona en
-Docker Desktop; en la nube, `DATABASE_URL` apunta a la base gestionada.
-En Windows (PowerShell), reemplacen `$(openssl rand -base64 48)` por un
-texto de 32 caracteres o más.
-
-### 8. Probar la API en el puerto asignado
-
-Desde la **segunda terminal**:
-
-```bash
-curl -i http://localhost:10000/api/v1/productos
+gh secret list
 ```
 
 ```text
-HTTP/1.1 401
-WWW-Authenticate: Bearer
-Content-Type: application/problem+json;charset=UTF-8
-
-{"type":"https://api.ejemplo.cr/errores/no-autenticado","title":"No autenticado","status":401,"detail":"Se requiere un token válido en la cabecera Authorization.","instance":"/api/v1/productos"}
+DEPLOY_HOOK	2026-10-15T19:30:18Z
 ```
+
+**Qué observar**: el archivo del workflow solo nombra el secreto
+(`${{ secrets.DEPLOY_HOOK }}`). Los archivos del repositorio forman parte
+de su historial; los secretos de GitHub se guardan cifrados y en los
+registros de ejecución aparecen como `***`. El nombre debe ser exactamente
+`DEPLOY_HOOK`: si no existe, la URL llega vacía y `desplegar` falla en el
+paso `curl` (por ejemplo, con `blank argument where content is expected`).
+
+### 13. Un cambio que pasa el pipeline y se despliega solo
+
+La rama `cambio-visible` agrega un párrafo a la descripción de la API en
+[`DemoApplication.java`](src/main/java/cr/una/eif509/demo/DemoApplication.java).
+Intégrenla a `main`:
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:10000/auth/login -H 'Content-Type: application/json' -d '{"correo": "admin@demo.cr", "clave": "admin123"}' | sed 's/.*"token":"\([^"]*\)".*/\1/')
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:10000/api/v1/productos
+git switch main && git pull && git merge --no-edit origin/cambio-visible && git push
 ```
 
-Salida esperada: `200`. Swagger UI está en
-`http://localhost:10000/swagger-ui.html`. Es la misma API de la Sesión 11:
-solo cambió el puerto, que ahora viene de `PORT`.
+En la pestaña **Actions** aparece una ejecución nueva de **CI/CD**:
 
-El origen de la SPA también viene del entorno. Una petición previa de CORS
-desde el origen configurado recibe 200; desde cualquier otro, 403:
+1. `verificar` (unos dos minutos): compila, ejecuta las 76 pruebas, Checkstyle
+   y el umbral de cobertura.
+2. Cuando termina en verde, empieza `desplegar` (unos segundos): llama al
+   deploy hook. En los registros, la URL aparece como `***`.
+3. En Render, pestaña **Events**, aparece `Deploy started` con el commit del
+   merge. La construcción y el arranque tardan unos cinco minutos en el plan
+   gratuito; mientras tanto, la versión anterior sigue atendiendo.
+
+Desde la terminal, para seguir la ejecución:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -X OPTIONS http://localhost:10000/api/v1/productos -H "Origin: https://eif509-spa.onrender.com" -H "Access-Control-Request-Method: GET"
-curl -s -o /dev/null -w "%{http_code}\n" -X OPTIONS http://localhost:10000/api/v1/productos -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: GET"
+gh run watch
 ```
 
-### 9. Qué pasa cuando falta una variable
-
-Detengan el contenedor (`Ctrl+C` en la primera terminal) y arránquenlo sin
-`JWT_SECRETO`:
+Y para saber si la versión nueva ya está publicada:
 
 ```bash
-docker run --rm -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev eif509-demo-sesion12
+curl -s https://eif509-demo-sesion13.onrender.com/v3/api-docs | grep -c "pipeline CI/CD"
 ```
+
+`0` significa que sigue la versión anterior; `1`, que la nueva ya está en
+línea. Recarguen Swagger UI: la descripción de la API termina con «Versión
+publicada por el pipeline CI/CD de la Sesión 13: solo llega a producción lo
+que pasó las pruebas.» Si no aparece, puede ser la caché del navegador:
+recarguen sin caché o ábranla en una ventana privada.
+
+**Qué observar**: después del merge no hubo ningún paso manual. Lo que llegó
+a producción pasó antes por las 76 pruebas, Checkstyle y el umbral de
+cobertura.
+
+### 14. Un cambio que rompe una prueba no llega a producción
+
+La rama `cambio-con-error` cambia el IVA de 13 % a 12 %. Abran un pull
+request:
+
+```bash
+gh pr create --base main --head cambio-con-error --title "IVA al 12 %" --body "Cambio que rompe la regla del IVA (demostración de la Sesión 13)."
+```
+
+En la pestaña **Actions** (o en la pestaña **Checks** del pull request),
+`verificar` termina en rojo:
 
 ```text
-***************************
-APPLICATION FAILED TO START
-***************************
-Caused by: java.lang.IllegalArgumentException: Could not resolve placeholder 'JWT_SECRETO' in value "${JWT_SECRETO}"
+CalculadoraIvaTest > totalConIva_sumaElTrecePorCientoAlSubtotal() FAILED
+CalculadoraIvaTest > iva_seRedondeaADosDecimales() FAILED
+PedidoMapperTest > copiaSoloLoQueLaVistaNecesita() FAILED
+76 tests completed, 3 failed
 ```
 
-Y con la URL de la base en el formato que entregan algunas plataformas
-(`postgres://usuario:clave@host/base`) en lugar del formato JDBC:
+Para ver el estado desde la terminal:
 
 ```bash
-docker run --rm -e SPRING_PROFILES_ACTIVE=prod -e DATABASE_URL=postgres://dev:dev@host.docker.internal:5432/eif509 -e DATABASE_USER=dev -e DATABASE_PASSWORD=dev -e JWT_SECRETO=$(openssl rand -base64 48) eif509-demo-sesion12
+gh pr checks cambio-con-error
 ```
 
-```text
-Failed to instantiate [com.zaxxer.hikari.HikariDataSource]: Factory method 'dataSource' threw exception with message: URL must start with 'jdbc'
-```
-
-**Qué observar**: los registros de arranque son el primer lugar donde se
-busca la causa. Si la aplicación no arranca en la nube, suele ser una
-variable ausente, una URL con el formato incorrecto o una migración
-fallida; el mensaje es el mismo que acaban de ver aquí.
-
-## Parte 2 · Despliegue en la plataforma como servicio
-
-Los pasos usan el panel de [Render](https://dashboard.render.com); el
-flujo en Railway es equivalente. Para su propio proyecto, el repositorio
-debe ser suyo (en GitHub): la plataforma lo lee directamente.
-
-### 10. Crear la base PostgreSQL gestionada
-
-En el panel, **New → Postgres**:
-
-| Campo | Valor |
-|---|---|
-| Name | `eif509-db` |
-| Database | `eif509` |
-| User | `eif509` |
-| Region | La misma que usarán para el servicio web (por ejemplo, Oregon) |
-| PostgreSQL Version | **16** (la misma del `docker-compose.yml`: paridad entre ambientes) |
-| Plan | **Free** |
-
-Pulsen **Create Database**. Cuando el estado sea **Available**, en la
-pestaña **Info** están los datos de conexión: **Hostname**, **Port**,
-**Database**, **Username**, **Password** y las URL **Internal** y
-**External**.
-
-**Qué observar**: la base es un servicio de respaldo; la aplicación solo
-necesita su URL y sus credenciales. La URL interna sirve para servicios de
-la misma región y cuenta (red privada); la externa, para conectarse desde
-su computadora, por ejemplo con `psql`.
-
-El plan gratuito de Render permite **una** base PostgreSQL por cuenta,
-con 1 GB, y **expira a los 30 días** de creada (con 14 días de gracia para
-pasarla a un plan de pago). Anoten la fecha: para el Laboratorio 6, los
-servicios deben seguir disponibles hasta que se publique la calificación.
-Si necesitan más tiempo, otros proveedores ofrecen PostgreSQL gestionado
-gratuito sin vencimiento (por ejemplo, [Neon](https://neon.tech) o
-[Supabase](https://supabase.com)); la aplicación no cambia, solo las tres
-variables.
-
-### 11. Convertir la URL al formato JDBC
-
-Spring necesita `jdbc:postgresql://host:5432/base`, con el usuario y la
-clave en variables separadas. Hay dos formas de obtener los valores:
-
-- Con los campos de la pestaña **Info**:
-  `DATABASE_URL=jdbc:postgresql://<Hostname>:<Port>/<Database>`,
-  `DATABASE_USER=<Username>` y `DATABASE_PASSWORD=<Password>`.
-- A partir de la **Internal Database URL**
-  (`postgresql://usuario:clave@host/base`), con este comando:
+**Qué observar**: la prueba del IVA falló, así que el pipeline se detuvo. El
+trabajo `desplegar` ni siquiera se ejecutó (en un pull request tampoco se
+ejecutaría, por la condición de la rama) y producción sigue igual. Al
+terminar, cierren el pull request sin integrarlo:
 
 ```bash
-python3 -c "import sys, urllib.parse as u; p = u.urlparse(sys.argv[1]); print(f'DATABASE_URL=jdbc:postgresql://{p.hostname}:{p.port or 5432}{p.path}'); print(f'DATABASE_USER={p.username}'); print(f'DATABASE_PASSWORD={p.password}')" 'postgresql://eif509:AbC123xyz@dpg-abc123-a/eif509'
+gh pr close cambio-con-error
 ```
 
-```text
-DATABASE_URL=jdbc:postgresql://dpg-abc123-a:5432/eif509
-DATABASE_USER=eif509
-DATABASE_PASSWORD=AbC123xyz
-```
+### 15. (Opcional) Proteger la rama main
 
-Reemplacen el último argumento por su URL, entre comillas simples. El
-comando funciona con `postgres://` y con `postgresql://`, y agrega el
-puerto 5432 si la URL no lo trae. Es el error más frecuente al conectar con
-la base (paso 9): si la aplicación no logra conectarse, revisen primero
-este formato.
+Hoy, GitHub todavía permite integrar el pull request aunque el pipeline esté
+en rojo. Para impedirlo: **Settings → Branches → Add branch ruleset** (o
+**Add classic branch protection rule**), rama `main`, y activen **Require a
+pull request before merging** y **Require status checks to pass**, con el
+check `verificar`. Desde ese momento, un cambio con pruebas en rojo no se
+puede integrar, y los cambios a `main` llegan por pull request revisado por
+la pareja. (En este repositorio no está activada, para poder integrar
+`cambio-visible` con `git push` en el paso 13.)
 
-### 12. Crear el servicio web
+## La actividad: ¿qué no está probando esta prueba?
 
-**New → Web Service**, opción **Git Provider**. Si es la primera vez,
-autoricen a Render para leer sus repositorios de GitHub y elijan el
-repositorio.
+| Prueba | Qué no verifica | Cómo corregirla | En este repositorio |
+|---|---|---|---|
+| 1 · Sin aserción | Ejecuta el cálculo pero no revisa el resultado | Agregar una aserción sobre el total esperado | `CalculadoraIvaTest` (paso 5) |
+| 2 · Prueba el doble | Verifica la respuesta del mock que la misma prueba configuró | Probar la clase real; simular solo sus colaboradores | `FacturaServiceTest` prueba el `FacturaService` real y simula solo el repositorio |
+| 3 · Depende del orden | Usa datos que creó otra prueba | Cada prueba crea sus propios datos; sin `static` compartido ni `@Order` | Las pruebas `*IT` crean sus propios pedidos |
+| 4 · Verifica la implementación | Revisa llamadas internas, no el resultado | Verificar el estado final y solo la interacción que es parte de la regla | `FacturaServiceTest` (paso 6) |
 
-| Campo | Valor |
-|---|---|
-| Name | `eif509-demo-sesion12` (forma parte de la URL: `https://eif509-demo-sesion12.onrender.com`) |
-| Region | La misma de la base |
-| Branch | `main` |
-| Language | **Docker** |
-| Instance Type | **Free** |
+## Para repetir la demostración
 
-**Qué observar**: con el lenguaje **Docker**, la plataforma construye la
-imagen a partir del `Dockerfile` del repositorio en cada `push` a `main`
-(**Auto-Deploy** queda activado por defecto). No hay comando de
-construcción ni de arranque que escribir: están en el `Dockerfile`.
+Después de la clase, `main` ya contiene el cambio visible. Para repetir el
+paso 13, creen una rama nueva desde `main` con otro cambio visible (por
+ejemplo, otro texto en la descripción de la API), súbanla e intégrenla de la
+misma forma. El paso 14 se repite tal cual: `cambio-con-error` sigue
+rompiendo la regla del IVA.
 
-### 13. Configurar las variables de entorno
+## Para su propio proyecto (taller, opción A)
 
-En el mismo formulario, sección **Environment Variables**, agreguen una por
-una (**Add Environment Variable**):
-
-| Clave | Valor |
-|---|---|
-| `SPRING_PROFILES_ACTIVE` | `prod` |
-| `DATABASE_URL` | El valor del paso 11 |
-| `DATABASE_USER` | El valor del paso 11 |
-| `DATABASE_PASSWORD` | El valor del paso 11 |
-| `JWT_SECRETO` | Un secreto **nuevo**, generado con `openssl rand -base64 48` |
-| `CORS_ORIGEN` | La URL de su SPA; si aún no existe, `https://eif509-spa.onrender.com` |
-
-No agreguen `PORT`: Render la define (`10000`) y la aplicación la lee.
-Pulsen **Deploy Web Service** (o **Create Web Service**, según la versión
-del panel).
-
-**Qué observar**: aquí, y solo aquí, viven los secretos. El secreto JWT de
-producción es distinto al de desarrollo y no está en ningún repositorio.
-Si más adelante cambian `JWT_SECRETO`, los tokens emitidos antes dejan de
-valer: es el comportamiento esperado.
-
-Para proyectos con MongoDB (subdominio de la Sesión 4), agreguen también
-`MONGODB_URI` con la cadena de conexión de
-[MongoDB Atlas](https://www.mongodb.com/atlas) (`mongodb+srv://...`) y
-declárenla en `application-prod.yml` como
-`spring.data.mongodb.uri: ${MONGODB_URI}`. Este repositorio no usa MongoDB.
-
-### 14. Seguir los registros de construcción y de arranque
-
-Al crear el servicio se abre la pestaña **Logs**. Lean con el grupo, en
-orden:
-
-1. `==> Cloning from https://github.com/...` y la construcción de la
-   imagen: la plataforma ejecuta el `Dockerfile`; Gradle descarga las
-   dependencias y compila (`RUN ./gradlew bootJar --no-daemon -x test`).
-   Tarda varios minutos la primera vez.
-2. El arranque: de Spring, `The following 1 profile is active: "prod"`.
-3. De Flyway, `Successfully applied 7 migrations to schema "public"`: la
-   base gestionada estaba vacía y ahora tiene las mismas tablas y datos
-   semilla que la local.
-4. `Tomcat started on port 10000`, `Started DemoApplication` y, de la
-   plataforma, `==> Your service is live` y
-   `==> Available at your primary URL https://eif509-demo-sesion12.onrender.com`.
-   En la instancia gratuita (0.1 CPU) el arranque tarda alrededor de dos
-   minutos; mientras tanto la plataforma repite
-   `==> No open ports detected, continuing to scan...`, lo cual es normal
-   hasta que Tomcat abre el puerto.
-
-**Qué observar**: si algo falla, este es el primer lugar donde se busca la
-causa (paso 9). La tabla de
-[Solución de problemas](#solución-de-problemas) reúne los casos frecuentes.
-
-### 15. Abrir la URL pública
-
-La URL está en la parte superior de la página del servicio.
-
-**Antes de abrirla, verifiquen que el servicio esté despierto.** En el plan
-gratuito, tras 15 minutos sin tráfico la plataforma suspende el servicio y
-la siguiente petición lo vuelve a arrancar, lo que tarda alrededor de dos
-minutos (el navegador muestra una página de espera de Render mientras
-tanto). Para no esperar frente al grupo, ejecuten esto un par de minutos
-antes:
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://eif509-demo-sesion12.onrender.com/api/v1/productos
-```
-
-Si responde `401` de inmediato, el servicio está despierto. Si la petición
-se queda esperando, está arrancando: en unos dos minutos responde `401` y
-desde ese momento todo es inmediato. Repítanlo si pasan más de 15 minutos
-sin usar la URL, o dejen el bucle de «Antes de empezar» en ejecución
-durante toda la clase.
-
-Abran `https://eif509-demo-sesion12.onrender.com/swagger-ui.html`: la misma
-documentación de la Sesión 9, ahora en internet y con HTTPS, que la
-plataforma gestiona. Pueden abrirla desde el teléfono.
-
-Desde la terminal, con su URL:
-
-```bash
-API=https://eif509-demo-sesion12.onrender.com
-curl -i $API/api/v1/productos
-```
-
-Salida esperada: `HTTP/2 401` (la plataforma atiende en HTTP/2 y agrega
-`strict-transport-security`) y el mismo Problem Details del paso 8. Inicien sesión y consulten con el token:
-
-```bash
-TOKEN=$(curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"correo": "admin@demo.cr", "clave": "admin123"}' | sed 's/.*"token":"\([^"]*\)".*/\1/')
-curl -s -H "Authorization: Bearer $TOKEN" "$API/api/v1/productos?page=0&size=3"
-```
-
-Salida esperada: la primera página del catálogo. En Swagger UI, ejecuten
-`POST /auth/login`, pulsen **Authorize**, peguen el token y prueben
-`GET /api/v1/pedidos`.
-
-**Qué observar**: el token funciona igual que en local porque el flujo es
-el mismo; lo único distinto es el secreto con el que se firmó. Si la
-primera respuesta tarda uno o dos minutos, el plan gratuito había
-suspendido el servicio por inactividad y la aplicación está arrancando de
-nuevo; las siguientes son normales. Las
-mismas peticiones están en [`peticiones/nube.http`](peticiones/nube.http):
-cambien el valor de `@host`.
-
-### 16. Un cambio pequeño y el despliegue automático
-
-Editen la descripción de la API en
-[`DemoApplication.java`](src/main/java/cr/una/eif509/demo/DemoApplication.java)
-(por ejemplo, agreguen al final «Desplegada en la nube en la Sesión 12.»)
-y publiquen el cambio:
-
-```bash
-git commit -am "Descripción de la API: desplegada en la nube"
-git push
-```
-
-En la pestaña **Events** del servicio aparece un despliegue nuevo:
-construcción de la imagen, arranque y, al terminar, `Live`. Recarguen
-Swagger UI: la descripción cambió.
-
-**Qué observar**: cada `push` a `main` genera una versión nueva sin pasos
-manuales. Por eso la integración continua debe ejecutar las pruebas antes:
-lo que llega a `main` se publica. En este repositorio, el CI de GitHub
-Actions ejecuta las 73 pruebas, la regla de cobertura, la SPA y la
-construcción de la imagen en cada `push`; en un equipo, la rama `main` se
-protege para que solo reciba cambios con el CI en verde.
-
-## La SPA en producción
-
-La SPA es un sitio estático: `npm run build` genera HTML, CSS y JavaScript
-que se publican en un servicio de sitios estáticos. En Render, **New →
-Static Site** sobre el mismo repositorio:
-
-| Campo | Valor |
-|---|---|
-| Name | `eif509-spa` (su URL: `https://eif509-spa.onrender.com`) |
-| Root Directory | `spa` |
-| Build Command | `npm ci && npm run build` |
-| Publish Directory | `dist` |
-| Environment Variables | `VITE_API_URL` = la URL de la API (sin `/` al final) |
-
-Después de crearlo, en **Redirects/Rewrites** agreguen la regla
-**Source** `/*`, **Destination** `/index.html`, **Action** `Rewrite`, para
-que las rutas de la SPA (`/login`) funcionen al recargar la página.
-
-Dos aspectos que deben tener presentes:
-
-- Las variables `VITE_` se incorporan al código al construir la SPA y
-  cualquier persona puede verlas en el navegador. Nunca deben contener
-  secretos; `VITE_API_URL` es pública y no hay problema.
-- `CORS_ORIGEN` en la API debe ser exactamente la URL de la SPA
-  (`https://eif509-spa.onrender.com`, sin `/` al final). Si la SPA no
-  recibe datos, revisen la consola del navegador (`F12`): el mensaje de
-  CORS de la Sesión 11 indica que el origen no coincide.
-
-## Secretos en el historial de Git
-
-Borrar un secreto del código en un commit nuevo no lo elimina: sigue en los
-commits anteriores para cualquier persona con acceso al repositorio.
-Revisen su proyecto antes de desplegar:
-
-```bash
-git log -p | grep -i -E "password|secreto|secret|mongodb\+srv" | head
-```
-
-Si aparece un valor real, la medida correcta es **cambiar el secreto**
-(generar uno nuevo y configurarlo solo en la plataforma); reescribir el
-historial no sustituye el cambio, porque alguien pudo haberlo copiado
-antes. En la rúbrica del Laboratorio 6, un secreto en uso en producción
-que aparezca en el historial califica el criterio de perfiles y secretos
-con cero.
+1. Copien [`config/checkstyle/checkstyle.xml`](config/checkstyle/checkstyle.xml)
+   y el bloque `checkstyle` de [`build.gradle`](build.gradle); ejecuten
+   `./gradlew checkstyleMain checkstyleTest` y corrijan lo que reporte.
+2. Verifiquen que `jacocoTestCoverageVerification` apunta al paquete de su
+   capa de negocio y que `check` depende de él.
+3. Reemplacen su workflow por [`ci-cd.yml`](.github/workflows/ci-cd.yml).
+4. En la plataforma, desactiven el Auto-Deploy y copien el deploy hook
+   (paso 11); guárdenlo como secreto `DEPLOY_HOOK` (paso 12).
+5. Hagan un push a `main` y sigan la ejecución en **Actions**.
 
 ## Comandos útiles
 
 | Acción | Comando |
 |---|---|
-| Levantar la base local | `docker compose up -d` |
-| Arrancar en desarrollo (perfil `dev`) | `export JWT_SECRETO=$(openssl rand -base64 48) && ./gradlew bootRun` |
-| Construir la imagen | `docker build -t eif509-demo-sesion12 .` |
-| Ejecutar la imagen como la plataforma | El comando del paso 7 |
-| Generar un secreto JWT | `openssl rand -base64 48` |
-| Despertar el servicio en la nube (tarda hasta dos minutos si estaba suspendido) | `curl -s -o /dev/null -w "%{http_code}\n" https://eif509-demo-sesion12.onrender.com/api/v1/productos` |
-| Mantenerlo despierto durante la clase | El bucle de «Antes de empezar» |
-| Convertir la URL de la base a JDBC | El comando del paso 11 |
-| Ver qué contiene la imagen final | `docker run --rm --entrypoint ls eif509-demo-sesion12 -la /app` |
-| Swagger UI en local / en la nube | `http://localhost:8080/swagger-ui.html` / `https://<nombre>.onrender.com/swagger-ui.html` |
-| Todas las pruebas y cobertura | `./gradlew test` |
-| Reiniciar la demo local desde cero | `docker compose down -v && docker compose up -d` |
+| Todas las verificaciones (lo que ejecuta el pipeline) | `./gradlew check` |
+| Solo las pruebas unitarias (sin Docker) | `./gradlew unitTest` |
+| Solo el análisis estático | `./gradlew checkstyleMain checkstyleTest` |
+| Reporte de cobertura | `build/reports/jacoco/test/html/index.html` |
+| Reporte de Checkstyle | `build/reports/checkstyle/main.html` |
+| Ver los secretos del repositorio (solo nombres) | `gh secret list` |
+| Seguir la última ejecución del pipeline | `gh run watch` |
+| Historial de ejecuciones | `gh run list` |
+| ¿Ya está publicada la versión nueva? | `curl -s https://eif509-demo-sesion13.onrender.com/v3/api-docs \| grep -c "pipeline CI/CD"` |
+| Despertar el servicio en la nube | `curl -s -o /dev/null -w "%{http_code}\n" https://eif509-demo-sesion13.onrender.com/api/v1/productos` |
 
 ## Solución de problemas
 
 | Problema | Causa | Solución |
 |---|---|---|
-| `Could not resolve placeholder 'JWT_SECRETO'` en los registros | Falta la variable en la plataforma (o en el `docker run`) | Agregarla en **Environment** y volver a desplegar |
-| `URL must start with 'jdbc'` | `DATABASE_URL` falta o tiene el formato `postgres://` | Convertirla al formato JDBC (paso 11) con usuario y clave en variables separadas |
-| `Connection to host:5432 refused` o `password authentication failed` | Host, usuario o clave incorrectos, o la base en otra región | Copiar de nuevo los valores de la pestaña **Info**; usar la misma región |
-| La construcción falla con `Permission denied` en `gradlew` | El archivo perdió el permiso de ejecución en Git | `git update-index --chmod=+x gradlew`, commit y push; o agregar `RUN chmod +x ./gradlew` antes de compilar en el `Dockerfile` |
-| La plataforma reporta `No open ports detected` o responde 502 | La aplicación todavía está arrancando (normal durante unos dos minutos en la instancia gratuita) o no escucha en el puerto de `PORT` | Esperar a `Tomcat started on port 10000`; si nunca aparece, verificar `server.port: ${PORT:8080}` en `application.yml` |
-| Flyway falla al migrar (`Migration V... failed`) | Un script con error, o una base que quedó a medias | Leer el script y la línea en el mensaje; en la demostración, recrear la base vacía |
-| La primera respuesta tarda uno o dos minutos | El plan gratuito suspendió el servicio por inactividad | Es esperable; las siguientes respuestas son normales |
-| Los tokens dejan de funcionar tras un despliegue | `JWT_SECRETO` cambió entre despliegues | Mantener el secreto estable en la plataforma |
-| La SPA no recibe datos | `CORS_ORIGEN` no coincide con la URL real de la SPA, o `VITE_API_URL` es incorrecta | Revisar la consola del navegador y ambas variables |
-| `docker build` falla por falta de espacio o memoria | Imágenes antiguas acumuladas | `docker system prune` y reintentar |
-| En Linux, el contenedor no encuentra `host.docker.internal` | Solo Docker Desktop define ese nombre | Agregar `--add-host=host.docker.internal:host-gateway` al `docker run` |
-| `Bind for 0.0.0.0:5432 failed: port is already allocated` | Otra base del curso usa el puerto | `docker ps` para ver cuál y `docker compose stop` desde su carpeta |
+| `verificar` falla por Testcontainers (`Could not find a valid Docker environment`) | El runner no tiene Docker | Usar `runs-on: ubuntu-latest`; en macOS y Windows los runners de GitHub no traen Docker |
+| `./gradlew check` falla en local por Testcontainers | Docker Desktop no está en ejecución | Abrir Docker Desktop y reintentar |
+| `desplegar` no aparece después de un push a `main` | `verificar` terminó en rojo, o la condición de la rama no coincide | Revisar `verificar`; la condición debe ser exactamente `if: github.ref == 'refs/heads/main'` |
+| `desplegar` falla en el paso `curl` (`blank argument` o `no URL specified`) | El secreto no existe o tiene otro nombre | Crear el secreto con el nombre exacto `DEPLOY_HOOK` (paso 12) |
+| `desplegar` falla con `curl: (22) ... 404` | El deploy hook se regeneró en la plataforma | Copiar el hook nuevo y actualizar el secreto |
+| La plataforma despliega en cada push, sin esperar al pipeline | El Auto-Deploy sigue activo | **Settings → Deploy → Auto-Deploy → Off** (paso 11) |
+| El cambio visible no aparece | La plataforma todavía está construyendo, o es la caché del navegador | Revisar **Events** en Render; recargar sin caché o abrir en una ventana privada |
+| La primera respuesta tarda uno o dos minutos | El plan gratuito suspendió el servicio por inactividad | Es esperable; dejar el bucle de «Antes de empezar» en ejecución |
+| `jacocoTestCoverageVerification` falla | La capa de negocio bajó del 70 % | Ver el reporte de cobertura y agregar pruebas a las reglas sin cubrir |
+| `checkstyleMain` falla | Una regla de Checkstyle no se cumple | El mensaje indica archivo, línea y regla; el detalle está en `build/reports/checkstyle/main.html` |
+| `git merge origin/cambio-visible` responde `not something we can merge` | El clon no tiene las ramas remotas actualizadas | Ejecutar `git fetch` y reintentar |
+| `gh: command not found` | Falta la GitHub CLI | Instalarla, o hacer el paso desde la página de GitHub |
 | `Unable to locate a Java Runtime` | Falta el JDK o `JAVA_HOME` | Ver Requisitos previos |
+
+Si todo falla durante la clase, la pestaña **Actions** conserva el historial:
+muestren una ejecución anterior exitosa (con `desplegar` en verde) y una
+fallida.
 
 ## Relación con los laboratorios
 
-**Laboratorio 6** (se asigna hoy; entrega el jueves 22 de octubre a las
-6:00 p. m.): este repositorio cubre los criterios de **despliegue en la
-nube** (2.5 puntos: API y base de datos en servicios gestionados, Flyway en
-el arranque y Swagger UI disponible) y de **perfiles y secretos** (1 punto:
-perfiles `dev` y `prod`, todos los secretos en variables de entorno de la
-plataforma, ninguno en el repositorio ni en su historial, y un secreto JWT
-de producción distinto al de desarrollo). En el taller de hoy, creen su
-servicio y su base, configuren las variables de su proyecto y dejen la API
-en proceso de despliegue; la SPA puede publicarse la próxima semana. Las
-URL públicas y las credenciales de los usuarios de prueba se registran en
-el aula virtual el día de la entrega.
+**Laboratorio 6** (entrega el jueves 22 de octubre a las 6:00 p. m.): este
+repositorio no agrega requisitos nuevos; si su despliegue todavía tiene
+problemas, el taller de hoy es para resolverlos (opción B).
+
+**Laboratorio 7** (se asigna el jueves 22): pedirá al menos 40 pruebas en
+verde en la integración continua y un pipeline como el de este repositorio.
+Este proyecto tiene 76 pruebas en tres niveles, el umbral de cobertura, el
+análisis estático y el despliegue automático desde `main`.
 
 ---
 
-> **Material de referencia del curso.** La configuración de despliegue de
-> su laboratorio debe corresponder a su propio proyecto y a sus propios
-> servicios; no copien este ejemplo.
+> **Material de referencia del curso.** Las pruebas y el pipeline de su
+> laboratorio deben corresponder a su propio proyecto; no copien este
+> ejemplo.
