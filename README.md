@@ -277,7 +277,7 @@ gh pr create --base main --head cambio-con-error --title "IVA al 12 %" --body "C
 (Sin la GitHub CLI: en la página del repositorio, **Pull requests → New pull
 request**, base `main`, compare `cambio-con-error`.) En la pestaña
 **Actions**, `verificar` termina en rojo con tres pruebas fallidas y
-`desplegar` ni siquiera aparece. Producción sigue igual.
+`desplegar` aparece como omitido (*skipped*). Producción sigue igual.
 
 ### Al terminar
 
@@ -609,7 +609,8 @@ En la pestaña **Actions** aparece una ejecución nueva de **CI/CD**:
 2. Cuando termina en verde, empieza `desplegar` (unos segundos): llama al
    deploy hook. En los registros, la URL aparece como `***`.
 3. En Render, pestaña **Events**, aparece `Deploy started` con el commit del
-   merge. La construcción y el arranque tardan unos cinco minutos en el plan
+   merge y la indicación **Triggered via Deploy Hook**: lo inició el
+   pipeline, no el push. La construcción y el arranque tardan unos cinco minutos en el plan
    gratuito; mientras tanto, la versión anterior sigue atendiendo.
 
 Desde la terminal, para seguir la ejecución:
@@ -660,8 +661,9 @@ gh pr checks cambio-con-error
 ```
 
 **Qué observar**: la prueba del IVA falló, así que el pipeline se detuvo. El
-trabajo `desplegar` ni siquiera se ejecutó (en un pull request tampoco se
-ejecutaría, por la condición de la rama) y producción sigue igual. Al
+trabajo `desplegar` aparece como omitido (*skipped*): no se ejecutó (en un
+pull request tampoco se ejecutaría, por la condición de la rama) y
+producción sigue igual. Al
 terminar, cierren el pull request sin integrarlo:
 
 ```bash
@@ -743,7 +745,9 @@ rompiendo la regla del IVA.
 
 Si todo falla durante la clase, la pestaña **Actions** conserva el historial:
 muestren una ejecución anterior exitosa (con `desplegar` en verde) y una
-fallida.
+fallida. El repositorio ya tiene ambas: la del commit del README en `main`
+y la del pull request de ensayo «IVA al 12 % (ensayo)», cerrado sin
+integrar.
 
 ## Relación con los laboratorios
 
