@@ -1,6 +1,6 @@
 ### Sesión 12 · La misma API, ahora en internet.
 ### Cambien el valor de @host por la URL pública de su servicio (sin / al final).
-@host = https://eif509-demo-sesion12.onrender.com
+@host = https://eif509-demo-sesion13.onrender.com
 
 ### 1. Sin token: 401, igual que en local
 GET {{host}}/api/v1/productos
