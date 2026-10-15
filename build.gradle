@@ -1,6 +1,8 @@
 plugins {
     id 'java'
     id 'jacoco'
+    // Sesión 13: análisis estático (lámina 14).
+    id 'checkstyle'
     id 'org.springframework.boot' version '3.3.2'
     id 'io.spring.dependency-management' version '1.1.6'
 }
@@ -65,6 +67,14 @@ jacoco {
     toolVersion = '0.8.12'
 }
 
+// Sesión 13 · Análisis estático: las reglas están en
+// config/checkstyle/checkstyle.xml. Se revisa el código de la aplicación y el
+// de las pruebas; una sola advertencia hace fallar ./gradlew check.
+checkstyle {
+    toolVersion = '10.18.1'
+    maxWarnings = 0
+}
+
 // Las pruebas necesitan un secreto JWT (la aplicación lo lee de la variable
 // de entorno JWT_SECRETO). Este valor es solo para pruebas; en ejecución,
 // cada quien define el suyo.
@@ -107,9 +117,9 @@ jacocoTestReport {
     }
 }
 
-// Requisito del Laboratorio 4: al menos 70 % de cobertura de líneas en la
-// capa de negocio.
-// Forma parte de `check` (y por lo tanto de `build` y del CI).
+// Umbral de cobertura (lámina 16): al menos 70 % de las líneas de la capa
+// de negocio (el paquete service). Si no se alcanza, la tarea falla y con
+// ella ./gradlew check, el comando que ejecuta el pipeline.
 jacocoTestCoverageVerification {
     dependsOn test
     violationRules {
@@ -125,4 +135,6 @@ jacocoTestCoverageVerification {
     }
 }
 
+// check agrupa las verificaciones: compilación, pruebas (unitarias y de
+// integración), Checkstyle y el umbral de cobertura, en un solo comando.
 check.dependsOn jacocoTestCoverageVerification
