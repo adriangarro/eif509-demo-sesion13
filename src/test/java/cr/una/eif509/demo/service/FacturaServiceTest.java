@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -29,13 +30,15 @@ class FacturaServiceTest {
 
     @InjectMocks FacturaService service;
 
+    // Sesión 13: antes solo verificaba la llamada a saveAndFlush (la
+    // implementación); ahora verifica el resultado: el monto de la factura.
     @Test
     void creaLaFacturaPorElTotalDelPedido() {
         when(facturas.saveAndFlush(any(Factura.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        service.crear(pedidoPor("15000.00"));
+        var factura = service.crear(pedidoPor("15000.00"));
 
-        verify(facturas).saveAndFlush(any(Factura.class));
+        assertThat(factura.getMonto()).isEqualByComparingTo("15000.00");
     }
 
     @Test
