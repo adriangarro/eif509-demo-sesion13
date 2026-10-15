@@ -18,7 +18,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
         description = "Contrato público del sistema de pedidos del curso: recursos REST, "
                 + "métodos HTTP usados según su semántica, códigos de estado correctos y errores "
                 + "en formato Problem Details (RFC 9457). Para probar los endpoints protegidos, "
-                + "obtengan un token con POST /auth/login y péguenlo en el botón «Authorize»."),
+                + "obtengan un token con POST /auth/login y péguenlo en el botón «Authorize». "
+                + "Versión publicada por el pipeline CI/CD de la Sesión 13: solo llega a producción "
+                + "lo que pasó las pruebas."),
         security = @SecurityRequirement(name = "bearer"))
 // Esquema de seguridad para Swagger UI: agrega el botón «Authorize», donde se
 // pega el token, y lo envía en la cabecera Authorization: Bearer <token>.
