@@ -9,6 +9,9 @@ import java.math.BigDecimal;
 // accesores, equals y hashCode generados. La entidad JPA nunca sale de la
 // capa de negocio; así se evita exponer sus relaciones LAZY y provocar un
 // N+1 al serializar el JSON.
+// Sesión 13: total es el subtotal (precio × cantidad); iva y totalConIva
+// los calcula CalculadoraIva.
 public record PedidoResumen(Long id, String cliente, String producto,
-                            BigDecimal total, EstadoPedido estado) {
+                            BigDecimal total, BigDecimal iva, BigDecimal totalConIva,
+                            EstadoPedido estado) {
 }

@@ -56,7 +56,8 @@ class PedidoControllerTest {
             jwt().jwt(j -> j.subject("admin@demo.cr")).authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
 
     static final PedidoResumen RESUMEN = new PedidoResumen(
-            11L, "Ana Rojas", "Teclado mecánico", new BigDecimal("30000.00"), EstadoPedido.CREADO);
+            11L, "Ana Rojas", "Teclado mecánico", new BigDecimal("30000.00"),
+            new BigDecimal("3900.00"), new BigDecimal("33900.00"), EstadoPedido.CREADO);
 
     @Test
     void postValidoDevuelve201ConLocationYElDto() throws Exception {
@@ -71,6 +72,7 @@ class PedidoControllerTest {
                 .andExpect(header().string("Location", "/api/v1/pedidos/11"))
                 .andExpect(jsonPath("$.id").value(11))
                 .andExpect(jsonPath("$.total").value(30000.00))
+                .andExpect(jsonPath("$.totalConIva").value(33900.00))
                 .andExpect(jsonPath("$.estado").value("CREADO"));
     }
 

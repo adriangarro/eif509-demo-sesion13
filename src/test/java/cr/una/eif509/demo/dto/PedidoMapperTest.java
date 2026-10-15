@@ -23,6 +23,8 @@ class PedidoMapperTest {
         assertThat(resumen.cliente()).isEqualTo("Ana Rojas");
         assertThat(resumen.producto()).isEqualTo("Teclado mecánico");
         assertThat(resumen.total()).isEqualByComparingTo("15000.00");
+        assertThat(resumen.iva()).isEqualByComparingTo("1950.00");
+        assertThat(resumen.totalConIva()).isEqualByComparingTo("16950.00");
         assertThat(resumen.estado()).isEqualTo(EstadoPedido.CREADO);
     }
 }

@@ -1,6 +1,7 @@
 package cr.una.eif509.demo.dto;
 
 import cr.una.eif509.demo.model.Pedido;
+import cr.una.eif509.demo.service.CalculadoraIva;
 
 // Mapeo manual de entidad a DTO: explícito y sin dependencias.
 // Criterio del curso: mapeo manual para uno o dos DTOs y MapStruct cuando
@@ -16,6 +17,8 @@ public final class PedidoMapper {
                 p.getCliente().getNombre(),
                 p.getProducto().getProducto(),
                 p.getTotal(),
+                CalculadoraIva.iva(p.getTotal()),
+                CalculadoraIva.totalConIva(p.getTotal()),
                 p.getEstado());
     }
 }
