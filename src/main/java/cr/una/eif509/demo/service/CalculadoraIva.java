@@ -10,7 +10,7 @@ import java.math.RoundingMode;
 public final class CalculadoraIva {
 
     // Tarifa general del impuesto al valor agregado en Costa Rica.
-    public static final BigDecimal TARIFA = new BigDecimal("0.13");
+    public static final BigDecimal TARIFA = new BigDecimal("0.12");
 
     private CalculadoraIva() {
     }
