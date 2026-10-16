@@ -178,32 +178,143 @@ la respuesta correcta sin token. Al terminar la clase, deténganlo con
 
 ### Ejemplo: comandos en la computadora del profesor (macOS)
 
-Con el repositorio en `~/Documents/Claude/eif509-demo-sesion13`, los
-comandos que cambian respecto a esta sección quedan así, listos para copiar.
-Los demás pasos son idénticos.
+El guion completo de la clase, en orden, con el repositorio ya clonado en
+`~/Documents/Claude/eif509-demo-sesion13` (no hace falta el `git clone`).
+Cada bloque se copia y se pega tal cual. Se usan tres terminales:
 
-Antes de empezar, en la terminal 3:
+| Terminal | Para qué |
+|---|---|
+| 1 | Gradle, Git y GitHub CLI (queda en la carpeta del repositorio) |
+| 2 | Consultas a la URL pública (no necesita `JAVA_HOME`) |
+| 3 | El bucle que mantiene despierto el servicio |
+
+**Antes de la clase.** Abran Docker Desktop y esperen a que termine de
+iniciar. En la terminal 3, dejen el bucle en ejecución (la primera línea
+puede tardar dos minutos; luego cada línea muestra `401`):
 
 ```bash
 while true; do curl -s -o /dev/null -w "$(date +%H:%M:%S) -> %{http_code}\n" https://eif509-demo-sesion13.onrender.com/api/v1/productos; sleep 300; done
 ```
 
-Paso 2, en la terminal 1:
+En la terminal 1, preparen la carpeta, Java y la rama `main`:
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home && cd ~/Documents/Claude/eif509-demo-sesion13 && git switch main && git pull && ./gradlew clean check
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home && cd ~/Documents/Claude/eif509-demo-sesion13 && git switch main && git pull
 ```
 
-Paso 4, en la terminal 1:
+Abran en el navegador las tres pestañas que se van a mostrar (Actions, Swagger
+UI y el pull request de ensayo como respaldo):
+
+```bash
+open https://github.com/adriangarro/eif509-demo-sesion13/actions https://eif509-demo-sesion13.onrender.com/swagger-ui.html https://github.com/adriangarro/eif509-demo-sesion13/pull/1
+```
+
+**Paso 1 · El workflow** (terminal 1). Se abre en Visual Studio Code:
+
+```bash
+code .github/workflows/ci-cd.yml
+```
+
+**Paso 2 · El umbral de cobertura y `./gradlew check`** (terminal 1). Abre
+`build.gradle` en el bloque `jacocoTestCoverageVerification`:
+
+```bash
+code -g build.gradle:123
+```
+
+```bash
+./gradlew clean check
+```
+
+Termina con `BUILD SUCCESSFUL` (unos dos minutos). El reporte de cobertura:
+
+```bash
+open build/reports/jacoco/test/html/index.html
+```
+
+**Opcional · Checkstyle detecta una importación sin usar** (terminal 1).
+Agrega `import java.util.List;` a `CalculadoraIva.java`, ejecuta Checkstyle
+(falla con `CalculadoraIva.java:5:8: Importación no usada`) y deja el archivo
+como estaba:
+
+```bash
+perl -pi -e 's/^(import java\.math\.RoundingMode;)$/$1\nimport java.util.List;/' src/main/java/cr/una/eif509/demo/service/CalculadoraIva.java; ./gradlew checkstyleMain; git checkout -- src/main/java/cr/una/eif509/demo/service/CalculadoraIva.java
+```
+
+**Opcional · Prueba de mutación: el IVA al 12 %** (terminal 1). Ejecuta las
+pruebas unitarias en `cambio-con-error` (fallan 3 de 52) y vuelve a `main`:
+
+```bash
+git switch cambio-con-error && ./gradlew unitTest; git switch main
+```
+
+**Paso 3 · El secreto DEPLOY_HOOK** (terminal 1). Muestra el nombre, nunca el
+valor:
+
+```bash
+gh secret list
+```
+
+**Paso 4 · Integrar el cambio visible a main** (terminal 1):
 
 ```bash
 cd ~/Documents/Claude/eif509-demo-sesion13 && git switch main && git pull && git merge --no-edit origin/cambio-visible && git push
 ```
 
-Paso 6, en la terminal 1:
+Seguir la ejecución del pipeline en la terminal (también se ve en la pestaña
+**Actions**). Espera diez segundos a que GitHub registre la ejecución y
+termina cuando `desplegar` concluye:
+
+```bash
+sleep 10 && gh run watch "$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')"
+```
+
+**Paso 5 · Ver el cambio en producción** (terminal 2). Revisa cada 20
+segundos y avisa cuando la versión nueva está en línea (unos cinco minutos
+después de `desplegar`):
+
+```bash
+until curl -s https://eif509-demo-sesion13.onrender.com/v3/api-docs | grep -q "pipeline CI/CD"; do echo "$(date +%H:%M:%S) todavía la versión anterior"; sleep 20; done; echo "$(date +%H:%M:%S) versión nueva en línea"
+```
+
+Cuando diga «versión nueva en línea», recarguen la pestaña de Swagger UI
+(`Cmd+Shift+R`): la descripción de la API termina con «Versión publicada por
+el pipeline CI/CD de la Sesión 13…».
+
+**Paso 6 · Un pull request que rompe una prueba** (terminal 1):
 
 ```bash
 cd ~/Documents/Claude/eif509-demo-sesion13 && gh pr create --base main --head cambio-con-error --title "IVA al 12 %" --body "Cambio que rompe la regla del IVA (demostración de la Sesión 13)."
+```
+
+Abrir el pull request en el navegador (pestaña **Checks**):
+
+```bash
+gh pr view cambio-con-error --web
+```
+
+Seguir las verificaciones en la terminal hasta que `verificar` termine en
+rojo (unos dos minutos; espera diez segundos a que GitHub registre la
+ejecución):
+
+```bash
+sleep 10 && gh pr checks cambio-con-error --watch
+```
+
+**Al terminar.** Cierren el pull request sin integrarlo (terminal 1):
+
+```bash
+gh pr close cambio-con-error
+```
+
+En la terminal 3, detengan el bucle con `Ctrl+C`.
+
+**Si algo falla en vivo.** La pestaña **Actions** conserva una ejecución en
+verde en `main` (con `desplegar` en verde) y la del pull request de ensayo
+#1 en rojo (con `desplegar` omitido). Para listarlas desde la terminal 1:
+
+```bash
+gh run list --limit 5
 ```
 
 ### Parte 1 · Las verificaciones en su computadora
